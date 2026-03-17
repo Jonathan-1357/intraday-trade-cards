@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "trade-card",
+  "title": "TradeCard",
+  "type": "object",
+  "required": [
+    "id",
+    "symbol",
+    "action",
+    "entry",
+    "stop_loss",
+    "target",
+    "quantity",
+    "confidence",
+    "status",
+    "reasons",
+    "created_at"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "symbol": { "type": "string" },
+    "action": { "type": "string", "enum": ["buy", "sell"] },
+    "entry": { "type": "number", "minimum": 0 },
+    "stop_loss": { "type": "number", "minimum": 0 },
+    "target": { "type": "number", "minimum": 0 },
+    "quantity": { "type": "integer", "minimum": 1 },
+    "confidence": {
+      "type": "string",
+      "enum": ["none", "weak", "valid", "strong"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["generated", "valid", "waiting", "triggered", "active", "invalidated", "completed"]
+    },
+    "reasons": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "risk_reward": { "type": "number" },
+    "capital_required": { "type": "number" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}
