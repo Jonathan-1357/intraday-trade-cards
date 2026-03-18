@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Trade Cards",
-  description: "Intraday Trade Card System",
+  title: "IRIS EDGE",
+  description: "IRIS EDGE — Intraday Market Intelligence",
 };
 
 export default function RootLayout({

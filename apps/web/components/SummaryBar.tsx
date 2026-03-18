@@ -22,7 +22,7 @@ export default function SummaryBar({ cards, riskConfig }: Props) {
     : null;
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
       <Stat label="Total Cards" value={String(cards.length)} />
       <Stat
         label="Confidence"

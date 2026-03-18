@@ -19,8 +19,10 @@ export const api = {
     },
     get: (id: string): Promise<TradeCard> =>
       apiFetch<TradeCard>(`/trade-cards/${id}`),
-    generate: (): Promise<{ generated: number; cards: TradeCard[] }> =>
+    generate: (): Promise<{ generated: number; cards: TradeCard[]; market_open: boolean }> =>
       apiFetch(`/trade-cards/generate`, { method: "POST" }),
+    preopen: (): Promise<{ generated: number; cards: TradeCard[]; market_open: boolean }> =>
+      apiFetch(`/trade-cards/preopen`, { method: "POST" }),
     refresh: (): Promise<{ updated: number }> =>
       apiFetch(`/trade-cards/refresh`, { method: "POST" }),
     archive: (ids: string[]): Promise<{ archived: number }> =>
@@ -49,5 +51,21 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ symbols }),
       }),
+  },
+  market: {
+    search: (q: string): Promise<Array<{symbol: string; name: string}>> =>
+      apiFetch(`/market/search?q=${encodeURIComponent(q)}`),
+    quote: (symbol: string): Promise<{symbol: string; name: string; price: number; prev_close: number; change: number; change_pct: number; open: number; high: number; low: number; volume: number}> =>
+      apiFetch(`/market/quote/${symbol}`),
+    candles: (
+      symbol: string,
+      opts: { interval?: string; days?: number; last_n?: number } = {}
+    ): Promise<Array<{time: number; open: number; high: number; low: number; close: number}>> => {
+      const p = new URLSearchParams();
+      if (opts.interval) p.set("interval", opts.interval);
+      if (opts.days)     p.set("days", String(opts.days));
+      if (opts.last_n)   p.set("last_n", String(opts.last_n));
+      return apiFetch(`/market/candles/${symbol}?${p}`);
+    },
   },
 };

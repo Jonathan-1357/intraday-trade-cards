@@ -203,12 +203,15 @@ class SignalResult:
 # Main evaluation function
 # ---------------------------------------------------------------------------
 
-def evaluate_signal(quote: dict) -> SignalResult:
+def evaluate_signal(quote: dict, bypass_time_gate: bool = False) -> SignalResult:
     price = quote["price"]
     atr = quote["atr"]
 
     # --- Tier 1: direction-agnostic hard gates ---
-    gate_results = [fn(quote) for fn in _HARD_GATES]
+    gates = _HARD_GATES if not bypass_time_gate else [
+        g for g in _HARD_GATES if g is not gate_in_time_window
+    ]
+    gate_results = [fn(quote) for fn in gates]
     failed = [(ok, msg) for ok, msg in gate_results if not ok]
     if failed:
         return SignalResult(

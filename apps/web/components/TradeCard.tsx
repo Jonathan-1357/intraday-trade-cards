@@ -1,4 +1,8 @@
+"use client";
+
+import { useState } from "react";
 import CardDetailModal from "@/components/CardDetailModal";
+import ExecuteModal from "@/components/ExecuteModal";
 import {
   ACTION_COLORS,
   CONFIDENCE_COLORS,
@@ -15,35 +19,31 @@ interface Props {
 }
 
 export default function TradeCard({ card, selected = false, onToggle }: Props) {
+  const [showExecute, setShowExecute] = useState(false);
+
   return (
     <div
       onClick={() => onToggle?.(card.id)}
-      className={`relative bg-gray-900 border rounded-xl p-4 flex flex-col gap-3 transition-colors
+      className={`relative bg-gray-900 border rounded-xl p-4 flex flex-col gap-3 transition-colors overflow-hidden
         ${onToggle ? "cursor-pointer" : ""}
         ${selected
           ? "border-blue-500 ring-1 ring-blue-500"
-          : "border-gray-800 hover:border-gray-600"
+          : card.status === "pre_open"
+            ? "border-amber-700 hover:border-amber-500"
+            : "border-gray-800 hover:border-gray-600"
         }`}
     >
-      {/* Checkbox */}
-      {onToggle && (
-        <div
-          className={`absolute top-3 right-3 w-4 h-4 rounded border flex items-center justify-center transition-colors
-            ${selected
-              ? "bg-blue-500 border-blue-500"
-              : "border-gray-600 bg-gray-800"
-            }`}
-        >
-          {selected && (
-            <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 8">
-              <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          )}
+
+      {/* Pre-Open Banner */}
+      {card.status === "pre_open" && (
+        <div className="absolute top-0 left-0 right-0 bg-amber-500/10 border-b border-amber-500/30 rounded-t-xl px-3 py-1 flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+          <span className="text-amber-400 text-xs font-medium tracking-wide uppercase">Pre-Opening Order</span>
         </div>
       )}
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-2 pr-6">
+      <div className={`flex items-start justify-between gap-2 pr-6 ${card.status === "pre_open" ? "mt-5" : ""}`}>
         <div>
           <p className="text-white font-semibold text-base tracking-wide">
             {card.symbol}
@@ -109,10 +109,26 @@ export default function TradeCard({ card, selected = false, onToggle }: Props) {
       )}
 
       {/* Footer */}
-      <div className="flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
         <p className="text-[10px] text-gray-600">{formatDate(card.created_at)}</p>
-        <CardDetailModal card={card} />
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setShowExecute(true)}
+            className={`px-3 py-1 text-xs font-semibold rounded-lg transition-colors
+              ${card.action === "buy"
+                ? "bg-green-700/30 text-green-400 hover:bg-green-700/50"
+                : "bg-red-700/30 text-red-400 hover:bg-red-700/50"
+              }`}
+          >
+            Execute
+          </button>
+          <CardDetailModal card={card} />
+        </div>
       </div>
+
+      {showExecute && (
+        <ExecuteModal card={card} onClose={() => setShowExecute(false)} />
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 ## Project
-This repo is for the Intraday Trade Card System.
+This repo is for IRIS EDGE — an intraday market intelligence and trade card system.
 
 ## Product intent
 Build a desktop-first web app that generates trade cards with:

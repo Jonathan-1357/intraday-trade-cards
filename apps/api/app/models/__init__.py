@@ -51,3 +51,73 @@ class WatchlistModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     symbols: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
+
+class ApiConfigModel(Base):
+    """Stores runtime API credentials — persists across restarts."""
+    __tablename__ = "api_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    upstox_token: Mapped[str] = mapped_column(String, nullable=False, default="")
+
+
+class DailyWatchlistModel(Base):
+    __tablename__ = "daily_watchlist"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    date: Mapped[str] = mapped_column(String, nullable=False)          # YYYY-MM-DD
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)        # buy | sell
+    reason_tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    indicator_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    dismissed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    traded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_daily_watchlist_date", "date"),
+    )
+
+
+class PaperWalletModel(Base):
+    """Single-row paper trading wallet config."""
+    __tablename__ = "paper_wallet"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    initial_balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+
+class PaperPositionModel(Base):
+    __tablename__ = "paper_positions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)   # buy | sell
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    avg_price: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+    __table_args__ = (Index("ix_paper_positions_symbol", "symbol"),)
+
+
+class PaperOrderModel(Base):
+    __tablename__ = "paper_orders"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    order_type: Mapped[str] = mapped_column(String, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    price: Mapped[float] = mapped_column(Float, nullable=False)   # requested price
+    executed_price: Mapped[float] = mapped_column(Float, nullable=False)  # actual fill price
+    status: Mapped[str] = mapped_column(String, nullable=False, default="complete")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+    __table_args__ = (Index("ix_paper_orders_symbol", "symbol"),)

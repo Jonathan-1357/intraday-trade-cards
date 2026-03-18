@@ -15,6 +15,7 @@ export const CONFIDENCE_COLORS: Record<Confidence, string> = {
 export const STATUS_COLORS: Record<CardStatus, string> = {
   generated: "text-gray-400",
   valid: "text-green-400",
+  pre_open: "text-amber-400",
   waiting: "text-yellow-400",
   triggered: "text-orange-400",
   active: "text-blue-400",
@@ -25,6 +26,7 @@ export const STATUS_COLORS: Record<CardStatus, string> = {
 export const STATUS_LABELS: Record<CardStatus, string> = {
   generated: "Generated",
   valid: "Valid",
+  pre_open: "Pre-Open",
   waiting: "Waiting",
   triggered: "Triggered",
   active: "Active",

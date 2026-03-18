@@ -22,7 +22,7 @@ def get_db():
 
 
 def init_db():
-    from app.models import RiskConfigModel, WatchlistModel  # noqa: F401 — registers tables
+    from app.models import RiskConfigModel, WatchlistModel, PaperWalletModel, PaperPositionModel, PaperOrderModel  # noqa: F401 — registers tables
 
     Base.metadata.create_all(bind=engine)
 

@@ -5,6 +5,7 @@ export type Confidence = "none" | "weak" | "valid" | "strong";
 export type CardStatus =
   | "generated"
   | "valid"
+  | "pre_open"
   | "waiting"
   | "triggered"
   | "active"

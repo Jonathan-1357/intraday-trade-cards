@@ -1,180 +1,185 @@
 # Signal Evaluation Rules
-## Intraday Trade Card System
+## IRIS EDGE — Intraday Trade Card System
 
 The signal evaluator is rule-based and deterministic. No ML or predictive models are involved.
 Every card on screen can be traced back to the exact conditions listed here.
-
-Source: `apps/api/app/services/signal_evaluator.py`
 
 ---
 
 ## Overview
 
-Evaluation runs in three tiers for each symbol:
+Evaluation runs in three sequential tiers:
 
-```
-Tier 1: Hard Gates      — any failure → no card
-Tier 2: Confirmation    — 1 point each (max 7)
-Tier 3: Bonus           — 0.5 points each (max 1.5)
-```
+1. **Hard Gates** — all must pass; any failure → no card generated
+2. **Confirmation Rules** — each rule scores 1 point; minimum 2 required to proceed
+3. **Bonus Rules** — each scores 0.5 points; added to confirmation score
 
-Total possible score: **8.5 points**
+Final **confidence** is mapped from total score:
 
-Direction (buy vs sell) is determined by whichever side scores higher. Buy wins on a tie.
+| Score | Confidence |
+|---|---|
+| ≥ 6 | `strong` |
+| ≥ 4 | `valid` |
+| ≥ 2 | `weak` |
+| < 2 | `none` (card not created) |
 
----
-
-## Tier 1: Hard Gates
-
-All gates are direction-agnostic and evaluated first.
-**Any single failure kills the card — it will not appear.**
-
-| Gate | Condition | Why |
-|---|---|---|
-| Time window | `in_time_window == True` | Avoid open noise and late-day chop |
-| Not near circuit | `near_circuit == False` | Avoid stocks about to halt |
-| Volume ratio | `volume / avg_volume >= 0.5` | Minimum liquidity; avoids slippage |
-| ATR minimum | `atr >= ₹5` | Stock must have enough range to trade |
-| SL valid | `atr_stop_loss > 0 AND entry != sl` | Ensures quantity calculation is sane |
-
-The SL validity gate is checked after direction is determined, since ATR-based SL direction depends on buy vs sell.
+Cards with confidence `none` are discarded. All other cards still require **R:R ≥ 1.5×** to be saved.
 
 ---
 
-## Tier 2: Confirmation Rules
+## Tier 1 — Hard Gates
 
-Scored after direction is chosen. Each passing rule adds **1 point**.
+All five gates must pass. Any single failure means no card is created for that symbol.
 
-### Buy Confirmation (7 rules)
-
-| Rule | Condition | Reason shown on card |
-|---|---|---|
-| Price above VWAP | `price > vwap` | "price above VWAP" |
-| RSI bullish zone | `55 ≤ rsi ≤ 73` | "RSI {value} in bullish zone (55–73)" |
-| EMA stack bullish | `price > ema9 AND ema9 > ema21` | "EMA stack bullish (price > ema9 > ema21)" |
-| MACD positive | `macd_histogram > 0` | "MACD histogram positive" |
-| OBV up | `obv_direction == "up"` | "OBV trending up" |
-| Nifty aligned | `nifty_direction != "down"` | "Nifty {direction} (not against trade)" |
-| StochRSI not overbought | `stoch_rsi < 80` | "StochRSI {value} below overbought (< 80)" |
-
-### Sell Confirmation (7 rules)
-
-| Rule | Condition | Reason shown on card |
-|---|---|---|
-| Price below VWAP | `price < vwap` | "price below VWAP" |
-| RSI bearish zone | `27 ≤ rsi ≤ 45` | "RSI {value} in bearish zone (27–45)" |
-| EMA stack bearish | `price < ema9 AND ema9 < ema21` | "EMA stack bearish (price < ema9 < ema21)" |
-| MACD negative | `macd_histogram < 0` | "MACD histogram negative" |
-| OBV down | `obv_direction == "down"` | "OBV trending down" |
-| Nifty aligned | `nifty_direction != "up"` | "Nifty {direction} (not against trade)" |
-| StochRSI not oversold | `stoch_rsi > 20` | "StochRSI {value} above oversold (> 20)" |
+| Gate | Condition |
+|---|---|
+| `gate_in_time_window` | Current time is between 09:15 and 15:30 IST. Bypassed in pre-open mode. |
+| `gate_not_near_circuit` | Price is not within 2% of the circuit breaker (upper or lower). |
+| `gate_volume_ratio` | Current volume ÷ average volume ≥ 0.5 |
+| `gate_atr_minimum` | ATR ≥ ₹5 (ensures the instrument has meaningful price movement) |
+| `gate_sl_valid` | Computed stop_loss > 0 and stop_loss ≠ entry |
 
 ---
 
-## Tier 3: Bonus Rules
+## Tier 2 — Confirmation Rules (1 point each)
 
-Each passing bonus rule adds **0.5 points**. Shown on card with `[+]` prefix.
+At least **2 points** are required to proceed.
 
-### Buy Bonus (3 rules)
+### BUY confirmation rules
 
-| Rule | Condition | Reason shown on card |
-|---|---|---|
-| Opening range breakout | `or_breakout == "up"` | "[+] opening range breakout (up)" |
-| Sector aligned | `sector_direction == "up"` | "[+] sector trending up" |
-| Bollinger squeeze | `bb_width < 0.02` | "[+] Bollinger squeeze (width {value} < 2%)" |
+| Rule | Condition |
+|---|---|
+| `rule_price_above_vwap` | price > VWAP |
+| `rule_rsi_bullish` | RSI between 55 and 73 |
+| `rule_ema_bullish_stack` | price > EMA9 > EMA21 |
+| `rule_macd_positive` | MACD > 0 |
+| `rule_obv_trending_up` | OBV rising (positive slope) |
+| `rule_nifty_not_down` | Nifty 50 EMA9 ≥ EMA21 (market not in downtrend) |
+| `rule_stochrsi_not_overbought` | StochRSI < 80 |
 
-### Sell Bonus (3 rules)
+### SELL confirmation rules
 
-| Rule | Condition | Reason shown on card |
-|---|---|---|
-| Opening range breakout | `or_breakout == "down"` | "[+] opening range breakout (down)" |
-| Sector aligned | `sector_direction == "down"` | "[+] sector trending down" |
-| Bollinger squeeze | `bb_width < 0.02` | "[+] Bollinger squeeze (width {value} < 2%)" |
-
----
-
-## Confidence Scoring
-
-| Score | Confidence | Meaning |
-|---|---|---|
-| 0–1 | `none` | Card not generated |
-| 2–3 | `weak` | Marginal setup — few signals agree |
-| 4–5 | `valid` | Reasonable setup — majority aligned |
-| 6+ | `strong` | High-conviction — most signals agree |
-
-Score = sum of all passing Tier 2 (1pt each) + Tier 3 (0.5pt each).
+| Rule | Condition |
+|---|---|
+| `rule_price_below_vwap` | price < VWAP |
+| `rule_rsi_bearish` | RSI between 27 and 45 |
+| `rule_ema_bearish_stack` | price < EMA9 < EMA21 |
+| `rule_macd_negative` | MACD < 0 |
+| `rule_obv_trending_down` | OBV falling (negative slope) |
+| `rule_nifty_not_up` | Nifty 50 EMA9 ≤ EMA21 (market not in uptrend) |
+| `rule_stochrsi_not_oversold` | StochRSI > 20 |
 
 ---
 
-## Stop Loss Calculation
+## Tier 3 — Bonus Rules (0.5 points each)
 
-SL is ATR-based, not raw high/low of day:
+### BUY bonus rules
 
-```
-Buy:  SL = entry - 1.0 × ATR
-Sell: SL = entry + 1.0 × ATR
-```
+| Rule | Condition |
+|---|---|
+| `bonus_or_breakout_up` | Price has broken above the opening range high |
+| `bonus_sector_up` | Sector is trending upward (sector proxy EMA9 > EMA21) |
+| `bonus_bb_squeeze` | Bollinger Band width < 2% (low volatility compression) |
 
-ATR is the Average True Range — a measure of how much a stock typically moves per day.
-Using 1×ATR prevents SL from being too tight (hit by normal noise) or too wide (unfavorable R:R).
+### SELL bonus rules
 
----
-
-## Target Calculation
-
-Target enforces a minimum 2:1 reward-to-risk ratio:
-
-```
-Buy:  target = entry + 2 × (entry - SL)
-Sell: target = entry - 2 × (SL - entry)
-```
-
-Cards with a computed R:R below 1.5 are discarded by `card_generator.py`.
+| Rule | Condition |
+|---|---|
+| `bonus_or_breakout_down` | Price has broken below the opening range low |
+| `bonus_sector_down` | Sector is trending downward |
+| `bonus_bb_squeeze` | Same squeeze condition as buy |
 
 ---
 
-## Evaluation Flow (step by step)
+## Entry, Stop Loss, and Target Calculation
 
+### ATR-based stop loss
 ```
-1. Fetch quote for symbol
-2. Run Tier 1 gates (direction-agnostic)
-   → Any fail? Return confidence=none, no card
-3. Score BUY rules (Tier 2 + Tier 3)
-4. Score SELL rules (Tier 2 + Tier 3)
-5. Pick direction with higher score (buy wins ties)
-6. Compute ATR-based SL and target
-7. Check SL validity gate
-   → Fail? Return confidence=none, no card
-8. Convert score to confidence
-9. Assemble reasons list (passing rules only)
-10. Return SignalResult
+stop_loss (buy)  = entry − 1 × ATR
+stop_loss (sell) = entry + 1 × ATR
 ```
+
+### Target (2× risk projection)
+```
+risk   = abs(entry − stop_loss)
+target (buy)  = entry + 2 × risk
+target (sell) = entry − 2 × risk
+```
+
+### Quantity (risk-based sizing)
+```
+risk_amount  = risk_per_trade            (if mode = "fixed")
+risk_amount  = total_capital × (risk_per_trade / 100)   (if mode = "percent")
+per_share_risk = abs(entry − stop_loss)
+quantity     = floor(risk_amount / per_share_risk)
+quantity     = max(quantity, 1)
+```
+
+### Risk/Reward
+```
+risk_reward = abs(target − entry) / abs(entry − stop_loss)
+```
+Cards with R:R < 1.5 are discarded regardless of confidence.
 
 ---
 
-## Adding New Rules
+## Pre-Open Mode
 
-Each rule is a standalone function with signature:
-
-```python
-def rule_name(q: dict) -> tuple[bool, str]:
-    return <condition>, "<reason string>"
-```
-
-To add a Tier 2 rule: implement the function, add it to `_BUY_CONF_RULES` or `_SELL_CONF_RULES`.
-To add a Tier 3 rule: implement the function, add it to `_BUY_BONUS_RULES` or `_SELL_BONUS_RULES`.
-To add a Hard Gate: implement the function, add it to `_HARD_GATES`.
-
-No other code needs to change.
+When `POST /trade-cards/preopen` is called:
+- `gate_in_time_window` is **bypassed**
+- Only **BUY** cards are generated (sell signals are not evaluated)
+- Cards receive status `pre_open` (shown with an amber banner in the UI)
+- All other tiers and filters apply normally
 
 ---
 
-## Data Sources
+## Quote Data Source
 
-For MVP, all indicator values come from `apps/api/app/utils/mock_data.py`.
-Each field is seeded deterministically by `hash(symbol)` — same symbol always produces the same quote.
+Each evaluation uses a quote dict containing:
 
-See `docs/data-models.md` for the full list of fields returned by `get_mock_quote()`.
+| Field | Used by |
+|---|---|
+| `price` | Entry, gate checks |
+| `vwap` | VWAP confirmation rules |
+| `rsi` | RSI rules |
+| `ema9`, `ema21`, `ema50` | EMA stack rules |
+| `macd` | MACD rule |
+| `obv` | OBV trending rule |
+| `stoch_rsi` | StochRSI rules |
+| `atr` | ATR gate, stop loss |
+| `volume`, `avg_volume` | Volume ratio gate |
+| `volume_ratio` | Volume confirmation |
+| `bb_width` | Bollinger Band squeeze |
+| `or_breakout` | OR breakout bonus |
+| `sector_direction` | Sector bonus |
+| `nifty_direction` | Nifty alignment rule |
+| `near_circuit` | Circuit gate |
+| `in_time_window` | Time gate |
 
-When connecting to real market data, replace `get_mock_quote()` only.
-The evaluator, risk calculator, and generator have no dependency on how the data was obtained.
+**Live data**: Fetched from Upstox v2 market quote + historical candles (for ATR, EMA, MACD, OBV computation via the `ta` library).
+
+**Mock data**: Deterministically generated using `hash(symbol)` as seed. Same symbol always produces the same indicators within a process run.
+
+---
+
+## Reason Strings
+
+Each passing rule appends a human-readable string to `card.reasons`. Examples:
+
+- `"Price above VWAP — momentum confirmed"`
+- `"RSI at 62.5 — bullish zone"`
+- `"EMA bullish stack — trending up"`
+- `"MACD positive — upward momentum"`
+- `"Opening range breakout — strength confirmed"`
+- `"Volume spike 2.8× average — institutional interest"`
+
+These strings appear verbatim on the trade card in the UI.
+
+---
+
+## Deduplication
+
+Before generating cards, the backend queries for existing non-archived, non-terminal cards. Any symbol already present in those results is skipped entirely — the same symbol will not get a duplicate card until the existing one reaches a terminal state (`completed` or `invalidated`).
+
+Terminal states: `completed`, `invalidated`
+Non-terminal states (blocks re-generation): `generated`, `valid`, `pre_open`, `waiting`, `triggered`, `active`

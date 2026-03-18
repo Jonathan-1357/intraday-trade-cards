@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models import RiskConfigModel, TradeCardModel, WatchlistModel
 from app.schemas import GenerateResponseSchema, TradeCardSchema
 from app.services.card_generator import generate_cards
 from app.services.card_validator import refresh_card_status
-from app.utils.mock_data import get_mock_quote
+from app.utils.market_hours import is_market_open
 
 router = APIRouter()
 
@@ -34,17 +35,39 @@ def get_trade_card(card_id: str, db: Session = Depends(get_db)):
 
 @router.post("/generate", response_model=GenerateResponseSchema)
 def generate(db: Session = Depends(get_db)):
+    market_open = is_market_open() or not settings.upstox_access_token
+
     risk_config = db.query(RiskConfigModel).first()
     watchlist = db.query(WatchlistModel).first()
-
     symbols = watchlist.symbols if watchlist else []
     cards = generate_cards(symbols, risk_config, db)
 
-    return GenerateResponseSchema(generated=len(cards), cards=cards)
+    return GenerateResponseSchema(
+        generated=len(cards),
+        cards=cards,
+        market_open=market_open,
+    )
+
+
+@router.post("/preopen", response_model=GenerateResponseSchema)
+def generate_preopen(db: Session = Depends(get_db)):
+    """Generate pre-opening BUY suggestions using yesterday's data."""
+    risk_config = db.query(RiskConfigModel).first()
+    watchlist = db.query(WatchlistModel).first()
+    symbols = watchlist.symbols if watchlist else []
+    cards = generate_cards(symbols, risk_config, db, preopen=True)
+
+    return GenerateResponseSchema(
+        generated=len(cards),
+        cards=cards,
+        market_open=False,
+    )
 
 
 @router.post("/refresh")
 def refresh(db: Session = Depends(get_db)):
+    if not settings.upstox_access_token:
+        raise HTTPException(503, "No live data — connect Upstox first")
     _TERMINAL = {"invalidated", "completed"}
     cards = (
         db.query(TradeCardModel)
@@ -52,11 +75,15 @@ def refresh(db: Session = Depends(get_db)):
         .filter(TradeCardModel.archived == False)  # noqa: E712
         .all()
     )
+    from app.utils.market_data import get_live_quote
     updated = 0
     for card in cards:
-        quote = get_mock_quote(card.symbol)
-        if refresh_card_status(card, quote):
-            updated += 1
+        try:
+            quote = get_live_quote(card.symbol, settings.upstox_access_token)
+            if refresh_card_status(card, quote):
+                updated += 1
+        except Exception:
+            continue
     db.commit()
     return {"updated": updated}
 
