@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 import CardDetailModal from "@/components/CardDetailModal";
 import ExecuteModal from "@/components/ExecuteModal";
 import {
@@ -20,6 +22,24 @@ interface Props {
 
 export default function TradeCard({ card, selected = false, onToggle }: Props) {
   const [showExecute, setShowExecute] = useState(false);
+  const [ltp, setLtp] = useState<number | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  async function fetchLtp() {
+    try {
+      const res = await fetch(`${BASE}/market/quote/${card.symbol}`);
+      if (res.ok) {
+        const data = await res.json();
+        setLtp(data.last_price ?? null);
+      }
+    } catch { /* silent */ }
+  }
+
+  useEffect(() => {
+    fetchLtp();
+    pollRef.current = setInterval(fetchLtp, 10000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [card.symbol]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
@@ -63,6 +83,32 @@ export default function TradeCard({ card, selected = false, onToggle }: Props) {
           </span>
         </div>
       </div>
+
+      {/* Live Price */}
+      {ltp !== null && (
+        <div className="flex items-center justify-between bg-gray-800/40 rounded-lg px-3 py-2">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-gray-500 text-[10px] uppercase tracking-wider">LTP</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`font-mono text-sm font-semibold ${
+              ltp >= card.entry
+                ? card.action === "buy" ? "text-green-400" : "text-red-400"
+                : card.action === "buy" ? "text-red-400" : "text-green-400"
+            }`}>
+              {formatCurrency(ltp)}
+            </span>
+            <span className={`text-[10px] font-medium ${
+              ltp >= card.entry
+                ? card.action === "buy" ? "text-green-500" : "text-red-500"
+                : card.action === "buy" ? "text-red-500" : "text-green-500"
+            }`}>
+              {ltp >= card.entry ? "▲" : "▼"} vs entry
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Prices */}
       <div className="grid grid-cols-3 gap-1 text-center">

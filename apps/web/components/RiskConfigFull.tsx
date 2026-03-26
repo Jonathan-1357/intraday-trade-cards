@@ -19,28 +19,31 @@ export default function RiskConfigFull({ initial }: { initial: RiskConfig }) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
-  const [liveBalance, setLiveBalance] = useState<number | null>(null);
+  // The displayed capital — sourced from paper wallet or Upstox, never user-edited
+  const [displayBalance, setDisplayBalance] = useState<number | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(false);
   const [balanceError, setBalanceError] = useState(false);
 
-  // Paper mode: seed capital from paper wallet whenever balance changes
+  // Paper mode: reflect paper wallet balance directly
   useEffect(() => {
-    if (isPaper && paper.balance > 0) {
-      setForm(prev => ({ ...prev, total_capital: Math.floor(paper.balance) }));
-    }
+    if (!isPaper) return;
+    const bal = paper.balance;
+    setDisplayBalance(bal);
+    setBalanceError(false);
+    setForm(prev => ({ ...prev, total_capital: Math.floor(bal) }));
   }, [isPaper, paper.balance]);
 
-  // Live mode: fetch once on mount (not tied to isPaper to avoid re-run races)
+  // Live mode: fetch from Upstox
   async function fetchLiveBalance() {
     setLoadingBalance(true);
     setBalanceError(false);
     try {
       const r = await fetch(`${BASE}/broker/funds`);
-      if (!r.ok) throw new Error("not ok");
+      if (!r.ok) throw new Error();
       const d = await r.json();
       const bal = d.total_balance ?? d.available_margin ?? null;
       if (bal != null) {
-        setLiveBalance(bal);
+        setDisplayBalance(bal);
         setForm(prev => ({ ...prev, total_capital: Math.floor(bal) }));
       } else {
         setBalanceError(true);
@@ -53,36 +56,24 @@ export default function RiskConfigFull({ initial }: { initial: RiskConfig }) {
   }
 
   useEffect(() => {
-    fetchLiveBalance();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!isPaper) fetchLiveBalance();
+    else setDisplayBalance(paper.balance);
+  }, [isPaper]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function set(key: keyof RiskConfig, value: string | number) {
-    setForm((f) => ({ ...f, [key]: value }));
+    setForm(f => ({ ...f, [key]: value }));
     setSaved(false);
     setError("");
   }
 
   async function handleSave() {
     if (form.risk_per_trade <= 0) { setError("Risk per trade must be positive"); return; }
-    if (form.total_capital <= 0) { setError("Capital must be positive"); return; }
-    if (form.risk_mode === "fixed" && form.risk_per_trade >= form.total_capital) {
-      setError("Risk per trade must be less than total capital"); return;
-    }
     if (form.risk_mode === "percent" && form.risk_per_trade > 100) {
       setError("Percentage cannot exceed 100"); return;
     }
-
     setSaving(true);
     try {
       await api.riskConfig.update(form);
-      // In paper mode, sync the capital value to the paper wallet balance
-      if (isPaper) {
-        await fetch(`${BASE}/broker/paper/status`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ set_balance: form.total_capital }),
-        });
-      }
       setSaved(true);
       router.refresh();
     } catch {
@@ -92,71 +83,52 @@ export default function RiskConfigFull({ initial }: { initial: RiskConfig }) {
     }
   }
 
+  const capital = displayBalance ?? form.total_capital;
   const effectiveRisk = form.risk_mode === "percent"
-    ? (form.risk_per_trade / 100) * form.total_capital
+    ? (form.risk_per_trade / 100) * capital
     : form.risk_per_trade;
-
   const maxExposure = effectiveRisk * form.max_concurrent_trades;
-  const exposurePct = form.total_capital > 0
-    ? ((maxExposure / form.total_capital) * 100).toFixed(1)
-    : "0";
+  const exposurePct = capital > 0 ? ((maxExposure / capital) * 100).toFixed(1) : "0";
 
   return (
     <div className="space-y-8">
-      {/* Capital */}
-      <section className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+
+      {/* Capital — always read-only */}
+      <section className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Capital</h2>
+          <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Available Capital</h2>
           {isPaper ? (
             <span className="text-[10px] font-medium text-indigo-400 bg-indigo-900/30 border border-indigo-800 px-2 py-0.5 rounded">
               ● Paper wallet
             </span>
           ) : loadingBalance ? (
-            <span className="text-[10px] text-gray-500 animate-pulse">Fetching balance…</span>
-          ) : liveBalance !== null ? (
-            <button onClick={fetchLiveBalance} className="text-[10px] text-green-500 bg-green-900/20 border border-green-900 px-2 py-0.5 rounded hover:bg-green-900/40 transition-colors">
-              ● Live · ₹{liveBalance.toLocaleString("en-IN", { maximumFractionDigits: 0 })} ↻
-            </button>
+            <span className="text-[10px] text-gray-500 animate-pulse">Fetching…</span>
           ) : balanceError ? (
             <button onClick={fetchLiveBalance} className="text-[10px] text-amber-500 hover:text-amber-300 transition-colors">
               Could not fetch · Retry ↻
             </button>
-          ) : null}
+          ) : (
+            <button onClick={fetchLiveBalance} className="text-[10px] text-green-500 hover:text-green-400 transition-colors">
+              ● Live ↻
+            </button>
+          )}
         </div>
 
-        {isPaper ? (
-          // Paper mode — editable input seeded from paper wallet
-          <div>
-            <label className="text-xs text-gray-400 mb-1.5 block">Total Paper Capital (₹)</label>
-            <input
-              type="number"
-              value={form.total_capital}
-              onChange={(e) => set("total_capital", parseFloat(e.target.value) || 0)}
-              className="w-full bg-gray-800 border border-indigo-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
-            />
-            <p className="text-gray-600 text-xs mt-1.5">
-              Synced from your paper wallet · edit to override
-            </p>
-          </div>
-        ) : (
-          // Live mode — read-only Upstox balance
-          <div>
-            <label className="text-xs text-gray-400 mb-1.5 block">Total Trading Capital (₹)</label>
-            <div className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2.5 flex items-center justify-between">
-              <span className="text-white text-sm font-mono">
-                {loadingBalance
-                  ? "—"
-                  : liveBalance !== null
-                    ? `₹${liveBalance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
-                    : `₹${form.total_capital.toLocaleString("en-IN")}`
-                }
-              </span>
-              <span className="text-[10px] text-gray-500">
-                {loadingBalance ? "loading…" : liveBalance !== null ? "from Upstox" : balanceError ? "fetch failed" : "saved value"}
-              </span>
-            </div>
-          </div>
-        )}
+        <div className="bg-gray-800/50 border border-gray-700 rounded-lg px-4 py-3 flex items-center justify-between">
+          <span className="text-white text-xl font-mono font-bold">
+            {loadingBalance && !isPaper
+              ? "—"
+              : displayBalance != null
+                ? `₹${displayBalance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
+                : balanceError
+                  ? "Unavailable"
+                  : "—"
+            }
+          </span>
+          <span className="text-[10px] text-gray-500">
+            {isPaper ? "paper wallet" : "Upstox equity"}
+          </span>
+        </div>
       </section>
 
       {/* Risk per trade */}

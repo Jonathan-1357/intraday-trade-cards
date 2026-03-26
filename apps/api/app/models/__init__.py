@@ -102,6 +102,8 @@ class PaperPositionModel(Base):
     action: Mapped[str] = mapped_column(String, nullable=False)   # buy | sell
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     avg_price: Mapped[float] = mapped_column(Float, nullable=False)
+    stop_loss: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    target: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (Index("ix_paper_positions_symbol", "symbol"),)

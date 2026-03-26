@@ -64,9 +64,12 @@ def generate_cards(
         if signal.entry == signal.stop_loss or rr < MIN_RISK_REWARD:
             continue
 
-        qty = calculate_quantity(
-            risk_config.risk_per_trade, signal.entry, signal.stop_loss
-        )
+        if risk_config.risk_mode == "percent":
+            risk_amount = (risk_config.risk_per_trade / 100) * risk_config.total_capital
+        else:
+            risk_amount = risk_config.risk_per_trade
+
+        qty = calculate_quantity(risk_amount, signal.entry, signal.stop_loss)
         capital = calculate_capital_required(signal.entry, qty)
 
         card = TradeCardModel(

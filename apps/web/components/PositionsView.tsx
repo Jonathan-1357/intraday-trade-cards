@@ -1,20 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePaperMode } from "@/context/PaperModeContext";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 
 interface Position {
   symbol: string;
+  action: string;
   quantity: number;
   average_price: number;
   last_price: number;
+  stop_loss: number | null;
+  target: number | null;
   pnl: number;
   pnl_pct: number;
   product: string;
   exchange: string;
-  mock?: boolean;
 }
 
 interface Order {
@@ -37,7 +39,11 @@ export default function PositionsView() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [closingId, setClosingId] = useState<string | null>(null);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const [closedSymbol, setClosedSymbol] = useState<string | null>(null);
   const [noToken, setNoToken] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function load() {
     setLoading(true);
@@ -50,6 +56,7 @@ export default function PositionsView() {
       if (posRes.ok) {
         const data = await posRes.json();
         setPositions(Array.isArray(data) ? data : (data.positions ?? []));
+        setLastUpdated(new Date());
       }
       if (ordRes.ok) {
         const data = await ordRes.json();
@@ -59,20 +66,48 @@ export default function PositionsView() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, [isPaper]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function refreshPrices() {
+    try {
+      const posUrl = isPaper ? `${BASE}/broker/paper/positions` : `${BASE}/broker/positions`;
+      const res = await fetch(posUrl);
+      if (res.ok) {
+        const data = await res.json();
+        setPositions(Array.isArray(data) ? data : (data.positions ?? []));
+        setLastUpdated(new Date());
+      }
+    } catch { /* silent */ }
+  }
+
+  useEffect(() => {
+    load();
+    pollRef.current = setInterval(refreshPrices, 10000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [isPaper]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleClose(pos: Position) {
     setClosingId(pos.symbol);
+    setCloseError(null);
+    setClosedSymbol(null);
     try {
       const url = isPaper ? `${BASE}/broker/paper/close` : `${BASE}/broker/close`;
-      const body: Record<string, unknown> = { symbol: pos.symbol, quantity: pos.quantity };
-      if (!isPaper) body.action = pos.action === "buy" ? "sell" : "buy";
-      await fetch(url, {
+      const closingAction = pos.action === "buy" ? "sell" : "buy";
+      const body: Record<string, unknown> = { symbol: pos.symbol, quantity: pos.quantity, action: closingAction };
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      await load();
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setCloseError(err.detail ?? "Failed to close position");
+      } else {
+        setClosedSymbol(pos.symbol);
+        // Optimistically remove from list immediately, then reload
+        setPositions(prev => prev.filter(p => p.symbol !== pos.symbol));
+        load();
+      }
+    } catch {
+      setCloseError("Network error — could not place close order");
     } finally {
       setClosingId(null);
     }
@@ -135,10 +170,29 @@ export default function PositionsView() {
         </div>
       </div>
 
+      {closeError && (
+        <div className="bg-red-900/20 border border-red-800 rounded-lg px-4 py-2.5 flex items-center justify-between gap-3">
+          <span className="text-red-400 text-xs">{closeError}</span>
+          <button onClick={() => setCloseError(null)} className="text-red-600 hover:text-red-400 text-xs">✕</button>
+        </div>
+      )}
+      {closedSymbol && (
+        <div className="bg-green-900/20 border border-green-800 rounded-lg px-4 py-2.5 flex items-center justify-between gap-3">
+          <span className="text-green-400 text-xs">{closedSymbol} closed successfully</span>
+          <button onClick={() => setClosedSymbol(null)} className="text-green-600 hover:text-green-400 text-xs">✕</button>
+        </div>
+      )}
+
       {/* Positions Table */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-white">Open Positions</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-white">Open Positions</h2>
+            <span className="flex items-center gap-1 text-[10px] text-green-500">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              Live · {lastUpdated ? lastUpdated.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}
+            </span>
+          </div>
           <button
             onClick={load}
             className="text-xs text-gray-500 hover:text-white transition-colors"
@@ -157,6 +211,8 @@ export default function PositionsView() {
                 <th className="px-4 py-2.5 text-right">Qty</th>
                 <th className="px-4 py-2.5 text-right">Avg Price</th>
                 <th className="px-4 py-2.5 text-right">LTP</th>
+                <th className="px-4 py-2.5 text-right">SL</th>
+                <th className="px-4 py-2.5 text-right">Target</th>
                 <th className="px-4 py-2.5 text-right">P&amp;L</th>
                 <th className="px-4 py-2.5 text-right">P&amp;L %</th>
                 <th className="px-4 py-2.5 text-right"></th>
@@ -175,6 +231,12 @@ export default function PositionsView() {
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-white font-medium">
                     ₹{pos.last_price.toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono text-red-400 text-xs">
+                    {pos.stop_loss ? `₹${pos.stop_loss.toFixed(2)}` : <span className="text-gray-700">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono text-green-400 text-xs">
+                    {pos.target ? `₹${pos.target.toFixed(2)}` : <span className="text-gray-700">—</span>}
                   </td>
                   <td className={`px-4 py-3 text-right font-mono font-semibold ${pos.pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
                     {pos.pnl >= 0 ? "+" : ""}₹{pos.pnl.toFixed(2)}

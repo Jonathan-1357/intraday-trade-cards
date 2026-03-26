@@ -7,7 +7,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database import get_db
+from app.database import get_db, SessionLocal
+from app.models import TradeCardModel
 
 router = APIRouter()
 
@@ -60,10 +61,14 @@ class OrderRequest(BaseModel):
     action: str          # buy | sell
     order_type: str      # LIMIT | MARKET | SL | SL-M
     price: float         # limit price (0 for MARKET)
-    trigger_price: float # stop-loss trigger (0 if not SL order)
+    trigger_price: float = 0  # stop-loss trigger (0 if not SL order)
     quantity: int
-    product: str = "I"   # I = Intraday, D = Delivery
+    product: str = "I"   # I = Intraday, D = Delivery, B = Bracket
     tag: str = "iris_edge"
+    # Bracket order fields (only used when product="B")
+    bracket: bool = False
+    bracket_sl: float = 0.0    # absolute SL price
+    bracket_target: float = 0.0  # absolute target price
 
 
 @router.post("/order")
@@ -79,11 +84,15 @@ def place_order(req: OrderRequest):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+    is_bracket = req.bracket and req.bracket_sl > 0 and req.bracket_target > 0
+    product = "B" if is_bracket else req.product
+    entry_price = req.price if req.order_type in ("LIMIT", "SL") else 0
+
     payload = {
         "quantity": req.quantity,
-        "product": req.product,
+        "product": product,
         "validity": "DAY",
-        "price": req.price if req.order_type in ("LIMIT", "SL") else 0,
+        "price": entry_price,
         "tag": req.tag,
         "instrument_token": key,
         "order_type": req.order_type,
@@ -92,6 +101,16 @@ def place_order(req: OrderRequest):
         "trigger_price": req.trigger_price if req.order_type in ("SL", "SL-M") else 0,
         "is_amo": False,
     }
+
+    if is_bracket:
+        # Upstox bracket expects price offsets from entry (positive values)
+        ref = entry_price if entry_price > 0 else req.bracket_sl  # fallback for MARKET
+        if req.action.lower() == "buy":
+            payload["squareoff"] = round(abs(req.bracket_target - ref), 2)
+            payload["stoploss"] = round(abs(ref - req.bracket_sl), 2)
+        else:
+            payload["squareoff"] = round(abs(ref - req.bracket_target), 2)
+            payload["stoploss"] = round(abs(req.bracket_sl - ref), 2)
 
     try:
         resp = httpx.post(
@@ -102,7 +121,7 @@ def place_order(req: OrderRequest):
         )
         resp.raise_for_status()
         data = resp.json().get("data", {})
-        return {"order_id": data.get("order_id"), "status": "placed", "mock": False}
+        return {"order_id": data.get("order_id"), "status": "placed", "mock": False, "bracket": is_bracket}
     except httpx.HTTPStatusError as e:
         detail = e.response.text
         raise HTTPException(e.response.status_code, f"Upstox order error: {detail}")
@@ -128,6 +147,17 @@ def get_positions():
         )
         resp.raise_for_status()
         raw = resp.json().get("data", [])
+
+        # Load SL/target from trade cards for each symbol
+        with SessionLocal() as db:
+            cards = {
+                row.symbol: row
+                for row in db.query(TradeCardModel)
+                .filter(TradeCardModel.archived == False)  # noqa: E712
+                .order_by(TradeCardModel.created_at.desc())
+                .all()
+            }
+
         positions = []
         for p in raw:
             qty = int(p.get("quantity", 0))
@@ -137,16 +167,23 @@ def get_positions():
             sell_avg = float(p.get("sell_price", 0) or 0)
             ltp = float(p.get("last_price", 0) or 0)
             pnl = float(p.get("pnl", 0) or 0)
+            action = "buy" if qty > 0 else "sell"
+            avg_price = buy_avg if action == "buy" else sell_avg
+            abs_qty = abs(qty)
+            symbol = p.get("tradingsymbol", "")
+            card = cards.get(symbol)
             positions.append({
-                "symbol": p.get("tradingsymbol", ""),
-                "quantity": qty,
-                "buy_avg": buy_avg,
-                "sell_avg": sell_avg,
-                "ltp": ltp,
+                "symbol": symbol,
+                "action": action,
+                "quantity": abs_qty,
+                "average_price": avg_price,
+                "last_price": ltp,
+                "stop_loss": round(card.stop_loss, 2) if card else None,
+                "target": round(card.target, 2) if card else None,
                 "pnl": round(pnl, 2),
-                "pnl_pct": round((pnl / (buy_avg * abs(qty))) * 100, 2) if buy_avg and qty else 0,
+                "pnl_pct": round((pnl / (avg_price * abs_qty)) * 100, 2) if avg_price and abs_qty else 0,
                 "product": p.get("product", ""),
-                "instrument_token": p.get("instrument_token", ""),
+                "exchange": "NSE",
             })
         return {"positions": positions, "mock": False}
     except Exception as e:

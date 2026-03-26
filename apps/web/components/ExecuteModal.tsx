@@ -34,9 +34,12 @@ export default function ExecuteModal({ card, onClose }: Props) {
   const [slPrice, setSlPrice] = useState(card.stop_loss);
   const [qty, setQty] = useState(card.quantity);
   const [orderType, setOrderType] = useState<OrderType>("LIMIT");
+  const [bracket, setBracket] = useState(false);
+  const [bracketSl, setBracketSl] = useState(card.stop_loss);
+  const [bracketTarget, setBracketTarget] = useState(card.target);
 
   const [placing, setPlacing] = useState(false);
-  const [result, setResult] = useState<{ order_id: string; mock: boolean; paper?: boolean } | null>(null);
+  const [result, setResult] = useState<{ order_id: string; mock: boolean; paper?: boolean; bracket?: boolean } | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -77,6 +80,11 @@ export default function ExecuteModal({ card, onClose }: Props) {
           price: orderType === "MARKET" ? 0 : price,
           trigger_price: ["SL", "SL-M"].includes(orderType) ? slPrice : 0,
           quantity: qty,
+          stop_loss: bracketSl,
+          target: bracketTarget,
+          bracket,
+          bracket_sl: bracketSl,
+          bracket_target: bracketTarget,
         }),
       });
       if (!res.ok) {
@@ -84,7 +92,7 @@ export default function ExecuteModal({ card, onClose }: Props) {
         throw new Error(err.detail ?? "Order failed");
       }
       const data = await res.json();
-      setResult({ order_id: data.order_id, mock: !!data.mock, paper: !!data.paper });
+      setResult({ order_id: data.order_id, mock: !!data.mock, paper: !!data.paper, bracket: !!data.bracket });
       if (isPaper) refreshPaper();
     } catch (e: any) {
       setError(e.message ?? "Order placement failed");
@@ -144,6 +152,11 @@ export default function ExecuteModal({ card, onClose }: Props) {
             {result.paper && (
               <p className="text-indigo-400 text-xs bg-indigo-900/20 border border-indigo-800 rounded-lg px-3 py-2">
                 Paper trade executed — no real money involved.
+              </p>
+            )}
+            {result.bracket && !result.paper && (
+              <p className="text-purple-400 text-xs bg-purple-900/20 border border-purple-800 rounded-lg px-3 py-2">
+                Bracket order placed — SL and target are live on the exchange.
               </p>
             )}
             <button
@@ -236,18 +249,64 @@ export default function ExecuteModal({ card, onClose }: Props) {
               </div>
             </div>
 
-            {/* Reference levels */}
-            <div className="grid grid-cols-3 gap-2 text-center text-xs">
-              {[
-                { label: "Entry", value: `₹${card.entry.toFixed(2)}`, cls: "text-white" },
-                { label: "Stop Loss", value: `₹${card.stop_loss.toFixed(2)}`, cls: "text-red-400" },
-                { label: "Target", value: `₹${card.target.toFixed(2)}`, cls: "text-green-400" },
-              ].map(({ label, value, cls }) => (
-                <div key={label} className="bg-gray-800/50 rounded-lg p-2">
-                  <p className="text-gray-600 text-[10px] uppercase">{label}</p>
-                  <p className={`font-mono mt-0.5 ${cls}`}>{value}</p>
+            {/* Bracket order toggle */}
+            <div
+              className={`rounded-xl border p-3 space-y-3 transition-colors ${bracket ? "border-purple-700 bg-purple-950/20" : "border-gray-800 bg-gray-800/30"}`}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-white">Bracket Order</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    {isPaper ? "Auto-exit when SL or target is hit" : "Places entry + SL + target simultaneously"}
+                  </p>
                 </div>
-              ))}
+                <button
+                  onClick={() => setBracket(b => !b)}
+                  className={`w-10 h-5 rounded-full transition-colors relative ${bracket ? "bg-purple-600" : "bg-gray-700"}`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${bracket ? "left-5.5 translate-x-0.5" : "left-0.5"}`} />
+                </button>
+              </div>
+
+              {bracket && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-red-400 font-medium block mb-1">Stop Loss ₹</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={bracketSl}
+                      onChange={e => setBracketSl(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-gray-800 border border-red-900/50 focus:border-red-500 rounded-lg px-3 py-2 text-white text-sm font-mono outline-none transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-green-400 font-medium block mb-1">Target ₹</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={bracketTarget}
+                      onChange={e => setBracketTarget(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-gray-800 border border-green-900/50 focus:border-green-500 rounded-lg px-3 py-2 text-white text-sm font-mono outline-none transition-colors"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {!bracket && (
+                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                  {[
+                    { label: "Entry", value: `₹${card.entry.toFixed(2)}`, cls: "text-white" },
+                    { label: "Stop Loss", value: `₹${card.stop_loss.toFixed(2)}`, cls: "text-red-400" },
+                    { label: "Target", value: `₹${card.target.toFixed(2)}`, cls: "text-green-400" },
+                  ].map(({ label, value, cls }) => (
+                    <div key={label} className="bg-gray-800/50 rounded-lg p-2">
+                      <p className="text-gray-600 text-[10px] uppercase">{label}</p>
+                      <p className={`font-mono mt-0.5 ${cls}`}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Cost summary */}
@@ -286,7 +345,7 @@ export default function ExecuteModal({ card, onClose }: Props) {
                   : "bg-red-600 hover:bg-red-500 text-white"
                 }`}
             >
-              {placing ? "Placing Order…" : `Place ${card.action.toUpperCase()} Order · ${qty} qty`}
+              {placing ? "Placing Order…" : bracket ? `Place Bracket ${card.action.toUpperCase()} · ${qty} qty` : `Place ${card.action.toUpperCase()} Order · ${qty} qty`}
             </button>
           </div>
         )}
