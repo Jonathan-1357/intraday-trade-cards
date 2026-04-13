@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePaperMode } from "@/context/PaperModeContext";
+import PositionChartModal from "@/components/PositionChartModal";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 
@@ -31,17 +32,36 @@ interface Order {
   mock?: boolean;
 }
 
+interface DayTrade {
+  symbol: string;
+  action: string;
+  order_type: string;
+  quantity: number;
+  executed_price: number;
+  realized_pnl: number;
+  time: string;
+}
+
+interface DayPnl {
+  date: string;
+  total_pnl: number;
+  trades: DayTrade[];
+}
+
 export default function PositionsView() {
   const { paper } = usePaperMode();
   const isPaper = paper.enabled;
 
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [dailyPnl, setDailyPnl] = useState<DayPnl[]>([]);
+  const [openDays, setOpenDays] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [closingId, setClosingId] = useState<string | null>(null);
   const [closeError, setCloseError] = useState<string | null>(null);
   const [closedSymbol, setClosedSymbol] = useState<string | null>(null);
   const [noToken, setNoToken] = useState(false);
+  const [chartPos, setChartPos] = useState<Position | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -51,7 +71,9 @@ export default function PositionsView() {
     try {
       const posUrl = isPaper ? `${BASE}/broker/paper/positions` : `${BASE}/broker/positions`;
       const ordUrl = isPaper ? `${BASE}/broker/paper/orders` : `${BASE}/broker/orders`;
-      const [posRes, ordRes] = await Promise.all([fetch(posUrl), fetch(ordUrl)]);
+      const fetches: Promise<Response>[] = [fetch(posUrl), fetch(ordUrl)];
+      if (isPaper) fetches.push(fetch(`${BASE}/broker/paper/daily-pnl`));
+      const [posRes, ordRes, pnlRes] = await Promise.all(fetches);
       if (posRes.status === 403) { setNoToken(true); setLoading(false); return; }
       if (posRes.ok) {
         const data = await posRes.json();
@@ -61,6 +83,10 @@ export default function PositionsView() {
       if (ordRes.ok) {
         const data = await ordRes.json();
         setOrders(Array.isArray(data) ? data : (data.orders ?? []));
+      }
+      if (pnlRes?.ok) {
+        const data = await pnlRes.json();
+        setDailyPnl(data.days ?? []);
       }
     } catch { /* api not ready */ }
     setLoading(false);
@@ -245,13 +271,21 @@ export default function PositionsView() {
                     {pos.pnl_pct >= 0 ? "+" : ""}{pos.pnl_pct.toFixed(2)}%
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => handleClose(pos)}
-                      disabled={closingId === pos.symbol}
-                      className="px-2.5 py-1 text-xs font-medium rounded border border-red-800 text-red-400 hover:bg-red-900/20 disabled:opacity-40 transition-colors"
-                    >
-                      {closingId === pos.symbol ? "Closing…" : "Close"}
-                    </button>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        onClick={() => setChartPos(pos)}
+                        className="px-2.5 py-1 text-xs font-medium rounded border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition-colors"
+                      >
+                        Chart
+                      </button>
+                      <button
+                        onClick={() => handleClose(pos)}
+                        disabled={closingId === pos.symbol}
+                        className="px-2.5 py-1 text-xs font-medium rounded border border-red-800 text-red-400 hover:bg-red-900/20 disabled:opacity-40 transition-colors"
+                      >
+                        {closingId === pos.symbol ? "Closing…" : "Close"}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -312,6 +346,87 @@ export default function PositionsView() {
           </table>
         )}
       </div>
+
+      {/* Daily P&L Accordion — paper mode only */}
+      {chartPos && (
+        <PositionChartModal
+          symbol={chartPos.symbol}
+          action={chartPos.action}
+          average_price={chartPos.average_price}
+          stop_loss={chartPos.stop_loss}
+          target={chartPos.target}
+          onClose={() => setChartPos(null)}
+        />
+      )}
+
+      {isPaper && dailyPnl.length > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-800">
+            <h2 className="text-sm font-semibold text-white">Realised P&amp;L History</h2>
+          </div>
+          <div className="divide-y divide-gray-800">
+            {dailyPnl.map((day) => {
+              const isOpen = openDays.has(day.date);
+              const toggle = () => setOpenDays(prev => {
+                const next = new Set(prev);
+                isOpen ? next.delete(day.date) : next.add(day.date);
+                return next;
+              });
+              return (
+                <div key={day.date}>
+                  <button
+                    onClick={toggle}
+                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-800/30 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`text-xs transition-transform ${isOpen ? "rotate-90" : ""}`}>▶</span>
+                      <span className="text-sm text-white font-medium">{day.date}</span>
+                      <span className="text-xs text-gray-500">{day.trades.length} trade{day.trades.length !== 1 ? "s" : ""}</span>
+                    </div>
+                    <span className={`font-mono text-sm font-semibold ${day.total_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {day.total_pnl >= 0 ? "+" : ""}₹{day.total_pnl.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                    </span>
+                  </button>
+                  {isOpen && (
+                    <table className="w-full text-xs border-t border-gray-800/50">
+                      <thead>
+                        <tr className="text-gray-600 text-[11px] uppercase tracking-wider bg-gray-800/20">
+                          <th className="px-6 py-2 text-left">Symbol</th>
+                          <th className="px-4 py-2 text-left">Side</th>
+                          <th className="px-4 py-2 text-left">Type</th>
+                          <th className="px-4 py-2 text-right">Qty</th>
+                          <th className="px-4 py-2 text-right">Exit Price</th>
+                          <th className="px-4 py-2 text-right">Realised P&amp;L</th>
+                          <th className="px-4 py-2 text-right">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {day.trades.map((t, i) => (
+                          <tr key={i} className="border-t border-gray-800/30 hover:bg-gray-800/20">
+                            <td className="px-6 py-2 font-medium text-white">{t.symbol}</td>
+                            <td className="px-4 py-2">
+                              <span className={`px-1.5 py-0.5 rounded uppercase font-semibold ${t.action === "buy" ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}>
+                                {t.action}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 text-gray-500">{t.order_type}</td>
+                            <td className="px-4 py-2 text-right font-mono text-gray-300">{t.quantity}</td>
+                            <td className="px-4 py-2 text-right font-mono text-gray-300">₹{t.executed_price.toFixed(2)}</td>
+                            <td className={`px-4 py-2 text-right font-mono font-semibold ${t.realized_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                              {t.realized_pnl >= 0 ? "+" : ""}₹{t.realized_pnl.toFixed(2)}
+                            </td>
+                            <td className="px-4 py-2 text-right text-gray-500">{t.time}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

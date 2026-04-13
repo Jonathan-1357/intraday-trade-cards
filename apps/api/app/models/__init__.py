@@ -119,6 +119,8 @@ class PaperOrderModel(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=False)   # requested price
     executed_price: Mapped[float] = mapped_column(Float, nullable=False)  # actual fill price
+    realized_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    is_close: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="complete")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 

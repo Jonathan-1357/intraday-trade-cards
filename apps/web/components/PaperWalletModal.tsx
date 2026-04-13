@@ -15,9 +15,6 @@ export default function PaperWalletModal({ onClose }: Props) {
   const [custom, setCustom] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const pnl = paper.balance - paper.initial_balance;
-  const pnlPct = paper.initial_balance > 0 ? (pnl / paper.initial_balance) * 100 : 0;
-
   async function handleAdd(amount: number) {
     setSaving(true);
     try {
@@ -65,28 +62,12 @@ export default function PaperWalletModal({ onClose }: Props) {
 
         <div className="px-5 py-4 space-y-4">
           {/* Balance summary */}
-          {paper.enabled && paper.initial_balance > 0 && (
-            <div className="bg-gray-800/60 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-gray-500 text-[10px] uppercase tracking-wider">Available Balance</p>
-                  <p className="text-white font-mono text-xl font-bold">
-                    ₹{paper.balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-gray-500 text-[10px] uppercase tracking-wider">P&amp;L</p>
-                  <p className={`font-mono text-sm font-semibold ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {pnl >= 0 ? "+" : ""}₹{Math.abs(pnl).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                  </p>
-                  <p className={`text-xs ${pnl >= 0 ? "text-green-500" : "text-red-500"}`}>
-                    {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center justify-between text-xs text-gray-500 border-t border-gray-700 pt-2">
-                <span>Initial capital: ₹{paper.initial_balance.toLocaleString("en-IN")}</span>
-              </div>
+          {paper.enabled && paper.balance > 0 && (
+            <div className="bg-gray-800/60 rounded-xl p-4">
+              <p className="text-gray-500 text-[10px] uppercase tracking-wider mb-1">Available Balance</p>
+              <p className="text-white font-mono text-2xl font-bold">
+                ₹{paper.balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </p>
             </div>
           )}
 

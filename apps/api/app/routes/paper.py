@@ -4,6 +4,7 @@ Requires Upstox to be connected for live price data.
 """
 import uuid
 import random
+from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -107,6 +108,8 @@ def place_paper_order(req: PaperOrderRequest, db: Session = Depends(get_db)):
 
     cost = executed_price * req.quantity
 
+    realized_pnl = 0.0
+
     if req.action.lower() == "buy":
         # First check if this is closing an existing short position
         short_pos = db.query(PaperPositionModel).filter_by(symbol=req.symbol, action="sell").first()
@@ -115,6 +118,7 @@ def place_paper_order(req: PaperOrderRequest, db: Session = Depends(get_db)):
             if w.balance < cost:
                 raise HTTPException(400, f"Insufficient paper balance. Need ₹{cost:.2f}, have ₹{w.balance:.2f}")
             w.balance -= cost
+            realized_pnl = round((short_pos.avg_price - executed_price) * req.quantity, 2)
             short_pos.quantity -= req.quantity
             if short_pos.quantity <= 0:
                 db.delete(short_pos)
@@ -147,6 +151,7 @@ def place_paper_order(req: PaperOrderRequest, db: Session = Depends(get_db)):
         long_pos = db.query(PaperPositionModel).filter_by(symbol=req.symbol, action="buy").first()
         if long_pos:
             # Closing a long — sell at market, credit proceeds
+            realized_pnl = round((executed_price - long_pos.avg_price) * req.quantity, 2)
             proceeds = executed_price * req.quantity
             w.balance += proceeds
             long_pos.quantity -= req.quantity
@@ -184,6 +189,8 @@ def place_paper_order(req: PaperOrderRequest, db: Session = Depends(get_db)):
         quantity=req.quantity,
         price=req.price,
         executed_price=executed_price,
+        realized_pnl=realized_pnl,
+        is_close=realized_pnl != 0,
         status="complete",
     )
     db.add(order)
@@ -223,8 +230,10 @@ def get_paper_positions(db: Session = Depends(get_db)):
                 w = _get_wallet(db)
                 if p.action == "buy":
                     w.balance += exit_price * p.quantity
+                    bracket_pnl = round((exit_price - p.avg_price) * p.quantity, 2)
                 else:
                     w.balance -= exit_price * p.quantity
+                    bracket_pnl = round((p.avg_price - exit_price) * p.quantity, 2)
                 label = "SL" if sl_hit else "Target"
                 order = PaperOrderModel(
                     id=str(uuid.uuid4()),
@@ -234,6 +243,8 @@ def get_paper_positions(db: Session = Depends(get_db)):
                     quantity=p.quantity,
                     price=exit_price,
                     executed_price=exit_price,
+                    realized_pnl=bracket_pnl,
+                    is_close=True,
                     status="complete",
                 )
                 db.add(order)
@@ -287,6 +298,34 @@ def get_paper_orders(db: Session = Depends(get_db)):
         ],
         "paper": True,
     }
+
+
+# ---------------------------------------------------------------------------
+# Daily P&L history (only close/exit orders carry realized_pnl)
+# ---------------------------------------------------------------------------
+@router.get("/daily-pnl")
+def get_daily_pnl(db: Session = Depends(get_db)):
+    rows = db.query(PaperOrderModel).filter(
+        PaperOrderModel.is_close == True  # noqa: E712
+    ).order_by(PaperOrderModel.created_at.desc()).all()
+
+    by_date: dict = defaultdict(lambda: {"date": "", "total_pnl": 0.0, "trades": []})
+    for r in rows:
+        date_key = r.created_at.strftime("%Y-%m-%d")
+        day = by_date[date_key]
+        day["date"] = date_key
+        day["total_pnl"] = round(day["total_pnl"] + r.realized_pnl, 2)
+        day["trades"].append({
+            "symbol": r.symbol,
+            "action": r.action,
+            "order_type": r.order_type,
+            "quantity": r.quantity,
+            "executed_price": round(r.executed_price, 2),
+            "realized_pnl": round(r.realized_pnl, 2),
+            "time": r.created_at.strftime("%H:%M:%S"),
+        })
+
+    return {"days": list(by_date.values())}
 
 
 # ---------------------------------------------------------------------------
